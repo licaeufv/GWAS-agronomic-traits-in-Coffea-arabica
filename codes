@@ -1,0 +1,167 @@
+# Data
+dadosfen <- read.table("fen_gen_GWAS.txt",h=T)
+dados<-read.table("gen_arabica_CR0_9_MAF005.txt",h=T)
+#dados de trabalho
+#Mapa arabica
+setwd("C:\\Moyses\\Ruane Alice\\Análises 2019\\2019_02")
+mapa <- read.table("mapa.txt",h=T)
+head(mapa)
+#Trabalhando com os dado
+gen2=cbind(as.data.frame(colnames(dados)),t(dados))
+gen2[1:10,1:10]
+colnames(gen2)=c("snp",seq(1,nrow(dados)))
+gen3=merge(gen2,mapa,intersect=c("snp", "snp"))
+gen3[1:10,1:10]
+dim(gen3)
+head(gen3)
+gen4 <- gen3[,-c(197,198)]
+head(gen4)
+gen5 <- t(gen4[,-c(1)])
+dim(gen5)
+nomes <- gen4[,1]
+length(nomes)
+gen5 <- as.matrix(gen5)
+colnames(gen5) <- c(as.vector(nomes))
+head(gen5)
+gen6 <- floor(gen5)
+head(gen6)
+gen6[1:5,1:5]
+###Dados para ajuste
+#dados de trabalho
+dados1 <- cbind(dadosfen[,c(2:19)],gen6)
+#Nomes Fenótipos
+names(dados1[, 1:18])
+dados1[1:5,1:20]
+
+####
+# Principal component
+snp <- dados1[,-c(1:18)]
+###Obtenção da matriz de parentesco genomica
+p=matrix(0,ncol(snp),1)
+q=matrix(0,ncol(snp),1)
+for(i in 1:ncol(snp))
+{p[i,]=(2*length(which(snp[,i]==2))+length(which(snp[,i]==1)))/(2*nrow(snp))
+q[i,]=(2*length(which(snp[,i]==0))+length(which(snp[,i]==1)))/(2*nrow(snp))}
+
+
+snp[snp==-1]<-"NA" #Código para dados perdidos era -1
+M=as.matrix(snp)
+for(j in 1:ncol(snp))
+{lo=which((M[,j])=="NA")
+if(2*p[j]<=0.5){M[lo,j]=0}
+if(2*p[j]>0.5 & 2*p[j]<=1.5){M[lo,j]=1}
+if(2*p[j]>1.5 & 2*p[j]<=2){M[lo,j]=2}}
+M1 <- matrix(as.numeric(M),nrow(snp),ncol(snp))
+snp <- M1
+
+#Obtenção Matrix G
+deno <- 2*(t(p)%*%q)
+G <- (as.matrix(snp)%*%t(as.matrix(snp)))/as.numeric(deno)
+
+###Componente Principal #Correção p estrutura de população
+autos<-eigen(G)
+#Percentual de explicação de cada componente principal
+percent_expli<-autos$values/sum(diag(G))
+p_acu <- sum(percent_expli[1])
+p_acu
+#Obtenção dos escores
+escores1<-G%*%autos$vectors
+
+#####GWAS LM
+pheno <- dados1[, 1:18]
+names(pheno)
+phen <- pheno$APl
+snp <- snp
+p <- matrix(NA,ncol(snp),1)
+r2 <- matrix(NA,ncol(snp),1)
+betas <- matrix(NA,ncol(snp),1)
+n_escores <- 1
+for(i in 1:ncol(snp))
+{rg<-lm(phen ~  snp[,i] + escores1[,1:n_escores])
+  srq<-summary(rg)
+ betas[i,1] <- rg$coefficients[2]
+  F<-(srq$coefficients[2,3])^2
+  pvalue<- pf(F,1,nrow(snp)-1, lower.tail=FALSE)
+  p[i]=pvalue
+  x<-anova(rg)
+  r2[i]<-(x[1,2]/(sum(x[1,2]+x[2,2]+x[3,2]))) }
+q<-p.adjust(p, method ="bonferroni")
+n =sum(q<0.05) #Só para saber se encontrou algum sign.
+n
+snpsData <- cbind(1:ncol(snp), q, p,r2, betas) #organizar
+nomes <- colnames(dados1[,-c(1:18)])
+dframe <- data.frame(snpsData,nomes)
+colnames(dframe) <- c("Marca","qvalue", "pvalue", "r2","effects","SNPname")
+head(dframe)
+orderFinal <- dframe [order(dframe [,2]),]
+head(orderFinal)
+
+
+##Análise do efeito
+##Análise de efeito (02/04/19) – Deve ser realizada para cada #marca
+
+dados <- cbind(phen,snp)
+dados <- as.matrix(dados)
+razao <- matrix(NA,n,1)
+for(j in 1:n)
+{
+#dim(dados[dados[,(orderFinal[j,1]+1)]==0,]) #Definir snp de #interesse
+dados_sel <- dados[dados[,(orderFinal[j,1]+1)]==0,1]
+med_sel <- mean(dados_sel)
+med_n_sel <- mean(dados[,1])
+razao[j,1] <- med_sel/ med_n_sel
+}
+razao
+#######################
+
+#Gráfico
+head(mapa)
+head(dframe)
+dim(mapa)
+dim(dframe)
+colnames(dframe) <- c("Marca","qvalue","pvalue","r2","effects","snp")
+mapa2 <- merge(mapa, dframe, by = intersect("snp", "snp"))
+head(mapa2)
+mapa2 <- mapa2[order(mapa2$chr,mapa2$pos),]
+head(mapa2)
+
+#############Manhatan plot
+library(ggplot2)
+tiff("Figure_teste_.tiff", width = 10, height = 6, units = 'in', res = 300)
+#index
+mapa2$index <- 1:nrow(mapa2)
+
+#Number of chromosomes in file
+size<-length(unique(mapa2$chr))
+#Defining X and Unmapped Chrs
+labels<-c(1:size)
+newdata <- mapa2
+aa <- tapply(newdata$index,newdata$chr,median)
+#aaa <- aa[-c(1,2,15:32)]
+labels <- c(names(aa))
+labels <- c("Unchr", "chr01", "chr02", "chr03" ,"chr04", "chr05", "chr06", "chr07", "chr08" ,"chr09", "chr10", "chr11", "", "Unigene")
+#Creating a matrix with the median Window ID by Chr
+ticks <- matrix(aa,size)
+#Defining the Color Pattern
+colours = rep(c("gray50","pink","blue","red", "orange","green","yellow","violet","black", "purple", "red","brown","gray","gray"),size)
+#Manhattan Plot
+  LS <- max(-log10(snpsData[,3]))+1
+  ggplot(data=newdata, aes(x=index, y=-log10(pvalue), color=factor(chr1)))+
+  geom_point(size=3)+
+  geom_hline (yintercept=c(-log10( 2.441764e-06), -log10(  4.883528e-07)), linetype=c(1,2))+
+  scale_x_continuous(breaks = ticks, labels=labels, expand=c(0.01,0.01))+
+  scale_y_continuous(breaks = c(7,4,2,0), limits=c(0,LS), expand=c(0,0))+
+  scale_colour_manual(values=colours,guide=FALSE)+
+  ylab(expression(bold(-log["10"](valorp))))+
+  xlab("\nSNPs ao longo do cromossomo")+
+  theme(panel.background    = element_rect(fill="white", colour="black"),
+        panel.grid.major.x  = element_blank(),
+        panel.grid.minor.x  = element_blank(),
+        panel.grid.minor.y  = element_blank(),
+        legend.position     = "none",
+        axis.title          = element_text(size=18,face="bold", color="black"),
+        axis.text           = element_text(size=9,face="bold", color="black"),
+        plot.title          = element_text(size=25, face="bold", color="black")
+    )
+dev.off()
+#######
